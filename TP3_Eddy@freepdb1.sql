@@ -97,10 +97,10 @@ BEGIN
             EXECUTE IMMEDIATE 'CREATE USER ' || v_username || ' IDENTIFIED BY "QWEqwe123123" PASSWORD EXPIRE';
             EXECUTE IMMEDIATE 'GRANT CONNECT TO ' || v_username;
             EXECUTE IMMEDIATE 'GRANT ROLE_VENDEUR TO ' || v_username;
-            DBMS_OUTPUT.PUT_LINE('User ' || v_username || ' creation reussie.');
+            DBMS_OUTPUT.PUT_LINE('Utilisateur ' || v_username || ' creation reussie.');
         EXCEPTION
             WHEN v_user_exists THEN
-                DBMS_OUTPUT.PUT_LINE('User ' || v_username || ' already exists.');
+                DBMS_OUTPUT.PUT_LINE('Utilisateur ' || v_username || ' existe déja.');
         END;
     END LOOP;
 END;
@@ -121,7 +121,7 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('Tous les tables utilisateur ' || p_utilisateur || ' ont été supprimées.');
 EXCEPTION
     WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('Erreure: ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('Erreur: ' || SQLERRM);
 END;
 /
 
@@ -146,16 +146,16 @@ BEGIN
     FOR tab IN (SELECT table_name FROM all_tables WHERE owner = p_schema) LOOP
         v_sql := 'GRANT SELECT ON ' || p_schema || '.' || tab.table_name || ' TO ' || p_utilisateur;
         EXECUTE IMMEDIATE v_sql;
-        DBMS_OUTPUT.PUT_LINE('Granted SELECT on ' || tab.table_name || ' to ' || p_utilisateur);
+        DBMS_OUTPUT.PUT_LINE('GRANT SELECT SUR ' || tab.table_name || ' pour ' || p_utilisateur);
     END LOOP;
     DBMS_OUTPUT.PUT_LINE('All SELECT privileges granted to ' || p_utilisateur || ' on schema ' || p_schema);
 EXCEPTION
     WHEN v_user_not_exists THEN
-        DBMS_OUTPUT.PUT_LINE('Error: User ' || p_utilisateur || ' does not exist.');
+        DBMS_OUTPUT.PUT_LINE('Erreur: Utilisateur ' || p_utilisateur || ' does not exist.');
     WHEN v_schema_not_exists THEN
-        DBMS_OUTPUT.PUT_LINE('Error: Schema ' || p_schema || ' does not exist.');
+        DBMS_OUTPUT.PUT_LINE('Erreur: Schema ' || p_schema || ' n''existe pas.');
     WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('Error: ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('Erreur: ' || SQLERRM);
 END;
 /
 
