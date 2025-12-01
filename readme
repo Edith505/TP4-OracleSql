@@ -1,0 +1,545 @@
+-- =======================================================
+-- PARTIE 2 : AUTOMATISATION (PL/SQL)
+-- =======================================================
+-- Auteur : DBA GlobalTech Solutions
+-- Date : 2024
+-- Description : Procédures d'automatisation pour la gestion des utilisateurs
+-- =======================================================
+
+-- =======================================================
+-- 1. Procédure PS_GENERER_VENDEURS
+-- =======================================================
+-- Description : Crée automatiquement les utilisateurs Oracle pour tous
+--               les employés ayant le poste 'Sales Representative'
+-- Paramètres : Aucun
+-- Tables utilisées : GLOBAL_DATA.EMPLOYEES
+-- =======================================================
+
+CREATE OR REPLACE PROCEDURE PS_GENERER_VENDEURS 
+IS
+    -- Variables pour stocker les informations de l'employé
+    v_username VARCHAR2(100);
+    v_sql VARCHAR2(4000);
+    v_count NUMBER;
+    
+    -- Curseur pour parcourir les Sales Representatives
+    CURSOR c_vendeurs IS
+        SELECT email, first_name, last_name, employee_id
+        FROM GLOBAL_DATA.EMPLOYEES
+        WHERE job_title = 'Sales Representative'
+        ORDER BY employee_id;
+        
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('=== GÉNÉRATION DES COMPTES VENDEURS ===');
+    DBMS_OUTPUT.PUT_LINE('Début du traitement : ' || TO_CHAR(SYSDATE, 'DD-MON-YYYY HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE('');
+    
+    -- Parcourir tous les vendeurs
+    FOR vendeur IN c_vendeurs LOOP
+        -- Convertir l'email en MAJUSCULES pour le nom d'utilisateur
+        v_username := UPPER(vendeur.email);
+        
+        BEGIN
+            -- Vérifier si l'utilisateur existe déjà
+            SELECT COUNT(*)
+            INTO v_count
+            FROM dba_users
+            WHERE username = v_username;
+            
+            IF v_count > 0 THEN
+                -- L'utilisateur existe déjà
+                DBMS_OUTPUT.PUT_LINE('⚠ EXISTE DÉJÀ : ' || v_username || 
+                                   ' (' || vendeur.first_name || ' ' || vendeur.last_name || ')');
+            ELSE
+                -- Créer l'utilisateur avec mot de passe temporaire expiré
+                v_sql := 'CREATE USER ' || v_username || 
+                        ' IDENTIFIED BY QWEqwe123123' ||
+                        ' DEFAULT TABLESPACE USERS' ||
+                        ' TEMPORARY TABLESPACE TEMP' ||
+                        ' QUOTA 10M ON USERS' ||
+                        ' PASSWORD EXPIRE';
+                
+                EXECUTE IMMEDIATE v_sql;
+                
+                -- Assigner le rôle ROLE_VENDEUR
+                v_sql := 'GRANT ROLE_VENDEUR TO ' || v_username;
+                EXECUTE IMMEDIATE v_sql;
+                
+                -- Donner le privilège de connexion
+                v_sql := 'GRANT CREATE SESSION TO ' || v_username;
+                EXECUTE IMMEDIATE v_sql;
+                
+                DBMS_OUTPUT.PUT_LINE('✓ CRÉÉ : ' || v_username || 
+                                   ' (' || vendeur.first_name || ' ' || vendeur.last_name || ')');
+            END IF;
+            
+        EXCEPTION
+            WHEN OTHERS THEN
+                DBMS_OUTPUT.PUT_LINE('✗ ERREUR pour ' || v_username || ' : ' || SQLERRM);
+        END;
+        
+    END LOOP;
+    
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('Fin du traitement : ' || TO_CHAR(SYSDATE, 'DD-MON-YYYY HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE('=== FIN DE LA GÉNÉRATION ===');
+    
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('ERREUR CRITIQUE : ' || SQLERRM);
+        RAISE;
+END PS_GENERER_VENDEURS;
+/
+
+-- =======================================================
+-- 2. Procédure PS_PURGE_USER_TABLES
+-- =======================================================
+-- Description : Supprime toutes les tables d'un utilisateur donné
+-- Paramètres : p_utilisateur - Nom de l'utilisateur dont on veut
+--              supprimer les tables
+-- Avertissement : Cette procédure est destructive!
+-- =======================================================
+
+CREATE OR REPLACE PROCEDURE PS_PURGE_USER_TABLES (
+    p_utilisateur VARCHAR2
+) IS
+    v_sql VARCHAR2(4000);
+    v_count NUMBER := 0;
+    v_username VARCHAR2(128);
+    
+    -- Curseur pour lister toutes les tables de l'utilisateur
+    CURSOR c_tables IS
+        SELECT table_name
+        FROM all_tables
+        WHERE owner = v_username
+        ORDER BY table_name;
+        
+BEGIN
+    -- Convertir le nom d'utilisateur en majuscules
+    v_username := UPPER(p_utilisateur);
+    
+    DBMS_OUTPUT.PUT_LINE('=== PURGE DES TABLES ===');
+    DBMS_OUTPUT.PUT_LINE('Utilisateur cible : ' || v_username);
+    DBMS_OUTPUT.PUT_LINE('Date : ' || TO_CHAR(SYSDATE, 'DD-MON-YYYY HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE('');
+    
+    -- Vérifier si l'utilisateur existe
+    SELECT COUNT(*)
+    INTO v_count
+    FROM dba_users
+    WHERE username = v_username;
+    
+    IF v_count = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('⚠ ERREUR : L''utilisateur ' || v_username || ' n''existe pas!');
+        RETURN;
+    END IF;
+    
+    -- Parcourir et supprimer toutes les tables
+    FOR table_rec IN c_tables LOOP
+        BEGIN
+            v_sql := 'DROP TABLE ' || v_username || '.' || table_rec.table_name || ' CASCADE CONSTRAINTS';
+            EXECUTE IMMEDIATE v_sql;
+            
+            v_count := v_count + 1;
+            DBMS_OUTPUT.PUT_LINE('✓ SUPPRIMÉE : ' || table_rec.table_name);
+            
+        EXCEPTION
+            WHEN OTHERS THEN
+                DBMS_OUTPUT.PUT_LINE('✗ ERREUR lors de la suppression de ' || 
+                                   table_rec.table_name || ' : ' || SQLERRM);
+        END;
+    END LOOP;
+    
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('Total de tables supprimées : ' || v_count);
+    DBMS_OUTPUT.PUT_LINE('=== FIN DE LA PURGE ===');
+    
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('ERREUR CRITIQUE : ' || SQLERRM);
+        RAISE;
+END PS_PURGE_USER_TABLES;
+/
+
+-- =======================================================
+-- 3. Procédure PS_GRANT_SELECT_ALL
+-- =======================================================
+-- Description : Donne le privilège SELECT à un utilisateur sur toutes
+--               les tables d'un schéma donné
+-- Paramètres : p_utilisateur - Utilisateur qui recevra les privilèges
+--              p_schema - Schéma contenant les tables
+-- =======================================================
+
+CREATE OR REPLACE PROCEDURE PS_GRANT_SELECT_ALL (
+    p_utilisateur VARCHAR2,
+    p_schema VARCHAR2
+) IS
+    v_sql VARCHAR2(4000);
+    v_count_user NUMBER;
+    v_count_schema NUMBER;
+    v_count_tables NUMBER := 0;
+    v_username VARCHAR2(128);
+    v_schema VARCHAR2(128);
+    
+    -- Curseur pour lister toutes les tables du schéma
+    CURSOR c_tables IS
+        SELECT table_name
+        FROM all_tables
+        WHERE owner = v_schema
+        ORDER BY table_name;
+        
+BEGIN
+    -- Convertir en majuscules
+    v_username := UPPER(p_utilisateur);
+    v_schema := UPPER(p_schema);
+    
+    DBMS_OUTPUT.PUT_LINE('=== DÉLÉGATION DE DROITS SELECT ===');
+    DBMS_OUTPUT.PUT_LINE('Utilisateur : ' || v_username);
+    DBMS_OUTPUT.PUT_LINE('Schéma cible : ' || v_schema);
+    DBMS_OUTPUT.PUT_LINE('Date : ' || TO_CHAR(SYSDATE, 'DD-MON-YYYY HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE('');
+    
+    -- Vérifier si l'utilisateur existe
+    SELECT COUNT(*)
+    INTO v_count_user
+    FROM dba_users
+    WHERE username = v_username;
+    
+    IF v_count_user = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('⚠ ERREUR : L''utilisateur ' || v_username || ' n''existe pas!');
+        RAISE_APPLICATION_ERROR(-20001, 'Utilisateur ' || v_username || ' inexistant');
+    END IF;
+    
+    -- Vérifier si le schéma existe
+    SELECT COUNT(*)
+    INTO v_count_schema
+    FROM dba_users
+    WHERE username = v_schema;
+    
+    IF v_count_schema = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('⚠ ERREUR : Le schéma ' || v_schema || ' n''existe pas!');
+        RAISE_APPLICATION_ERROR(-20002, 'Schéma ' || v_schema || ' inexistant');
+    END IF;
+    
+    -- Parcourir toutes les tables et accorder SELECT
+    FOR table_rec IN c_tables LOOP
+        BEGIN
+            v_sql := 'GRANT SELECT ON ' || v_schema || '.' || 
+                    table_rec.table_name || ' TO ' || v_username;
+            EXECUTE IMMEDIATE v_sql;
+            
+            v_count_tables := v_count_tables + 1;
+            DBMS_OUTPUT.PUT_LINE('✓ ACCORDÉ : SELECT sur ' || table_rec.table_name);
+            
+        EXCEPTION
+            WHEN OTHERS THEN
+                DBMS_OUTPUT.PUT_LINE('✗ ERREUR pour ' || table_rec.table_name || 
+                                   ' : ' || SQLERRM);
+        END;
+    END LOOP;
+    
+    IF v_count_tables = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('⚠ ATTENTION : Aucune table trouvée dans le schéma ' || v_schema);
+    ELSE
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('Total de privilèges accordés : ' || v_count_tables);
+    END IF;
+    
+    DBMS_OUTPUT.PUT_LINE('=== FIN DE LA DÉLÉGATION ===');
+    
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('ERREUR CRITIQUE : ' || SQLERRM);
+        RAISE;
+END PS_GRANT_SELECT_ALL;
+/
+
+-- =======================================================
+-- SCRIPTS DE TEST DES PROCÉDURES
+-- =======================================================
+
+SET SERVEROUTPUT ON SIZE UNLIMITED;
+
+-- =======================================================
+-- TEST 1 : Génération des vendeurs
+-- =======================================================
+PROMPT *** TEST 1 : Génération automatique des vendeurs ***
+BEGIN
+    PS_GENERER_VENDEURS;
+END;
+/
+
+-- Vérifier les utilisateurs créés
+PROMPT
+PROMPT Vérification des utilisateurs vendeurs créés :
+SELECT username, account_status, created, profile
+FROM dba_users
+WHERE username IN (
+    SELECT UPPER(email) 
+    FROM GLOBAL_DATA.EMPLOYEES 
+    WHERE job_title = 'Sales Representative'
+)
+ORDER BY created DESC;
+
+-- Vérifier les rôles assignés
+PROMPT
+PROMPT Vérification des rôles assignés :
+SELECT grantee, granted_role
+FROM dba_role_privs
+WHERE grantee IN (
+    SELECT UPPER(email) 
+    FROM GLOBAL_DATA.EMPLOYEES 
+    WHERE job_title = 'Sales Representative'
+)
+AND granted_role = 'ROLE_VENDEUR'
+ORDER BY grantee;
+
+-- =======================================================
+-- TEST 2 : Test spécifique pour evie.harrison@example.com
+-- =======================================================
+PROMPT
+PROMPT *** TEST 2 : Vérification pour EVIE.HARRISON@EXAMPLE.COM ***
+SELECT username, account_status, password_lifetime
+FROM dba_users
+WHERE username = 'EVIE.HARRISON@EXAMPLE.COM';
+
+-- Vérifier les privilèges
+SELECT privilege
+FROM dba_sys_privs
+WHERE grantee = 'EVIE.HARRISON@EXAMPLE.COM'
+ORDER BY privilege;
+
+-- =======================================================
+-- TEST 3 : PS_GRANT_SELECT_ALL
+-- =======================================================
+PROMPT
+PROMPT *** TEST 3 : Délégation de droits SELECT ***
+
+-- Créer un utilisateur de test
+BEGIN
+    EXECUTE IMMEDIATE 'DROP USER TEST_USER CASCADE';
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END;
+/
+
+CREATE USER TEST_USER IDENTIFIED BY Test123!
+DEFAULT TABLESPACE USERS
+QUOTA 10M ON USERS;
+
+GRANT CREATE SESSION TO TEST_USER;
+
+-- Tester la procédure
+BEGIN
+    PS_GRANT_SELECT_ALL('TEST_USER', 'GLOBAL_DATA');
+END;
+/
+
+-- Vérifier les privilèges accordés
+PROMPT
+PROMPT Privilèges SELECT accordés à TEST_USER :
+SELECT table_schema, table_name, privilege
+FROM dba_tab_privs
+WHERE grantee = 'TEST_USER'
+AND privilege = 'SELECT'
+ORDER BY table_name;
+
+-- Test avec utilisateur inexistant (doit générer une erreur)
+PROMPT
+PROMPT *** TEST 4 : Test erreur utilisateur inexistant ***
+BEGIN
+    PS_GRANT_SELECT_ALL('UTILISATEUR_INEXISTANT', 'GLOBAL_DATA');
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Erreur capturée correctement : ' || SQLERRM);
+END;
+/
+
+-- Test avec schéma inexistant (doit générer une erreur)
+PROMPT
+PROMPT *** TEST 5 : Test erreur schéma inexistant ***
+BEGIN
+    PS_GRANT_SELECT_ALL('TEST_USER', 'SCHEMA_INEXISTANT');
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Erreur capturée correctement : ' || SQLERRM);
+END;
+/
+
+-- =======================================================
+-- TEST 6 : PS_PURGE_USER_TABLES
+-- =======================================================
+PROMPT
+PROMPT *** TEST 6 : Purge des tables d'un utilisateur ***
+
+-- Créer quelques tables de test pour TEST_USER
+CONNECT TEST_USER/Test123!
+
+CREATE TABLE test_table1 (id NUMBER, nom VARCHAR2(50));
+CREATE TABLE test_table2 (id NUMBER, valeur NUMBER);
+CREATE TABLE test_table3 (date_creation DATE);
+
+PROMPT Tables créées pour TEST_USER :
+SELECT table_name FROM user_tables ORDER BY table_name;
+
+-- Retourner en SYS pour purger
+CONNECT / AS SYSDBA
+
+BEGIN
+    PS_PURGE_USER_TABLES('TEST_USER');
+END;
+/
+
+-- Vérifier que les tables ont été supprimées
+PROMPT
+PROMPT Vérification après purge :
+SELECT COUNT(*) AS nb_tables_restantes
+FROM all_tables
+WHERE owner = 'TEST_USER';
+
+-- =======================================================
+-- PARTIE 3 : REQUÊTES AVANCÉES ET VUES
+-- =======================================================
+
+-- =======================================================
+-- 1. Analyse des ventes (GROUP BY / HAVING)
+-- =======================================================
+PROMPT
+PROMPT *** REQUÊTE 1 : Analyse des ventes par année et vendeur ***
+PROMPT Chiffre d'affaires > 50 000$, trié par année décroissante
+
+SELECT 
+    EXTRACT(YEAR FROM o.order_date) AS annee,
+    e.employee_id,
+    e.first_name || ' ' || e.last_name AS vendeur,
+    e.email,
+    COUNT(DISTINCT o.order_id) AS nb_commandes,
+    SUM(oi.quantity * oi.unit_price) AS chiffre_affaires
+FROM 
+    GLOBAL_DATA.ORDERS o
+    INNER JOIN GLOBAL_DATA.ORDER_ITEMS oi ON o.order_id = oi.order_id
+    INNER JOIN GLOBAL_DATA.EMPLOYEES e ON o.salesman_id = e.employee_id
+GROUP BY 
+    EXTRACT(YEAR FROM o.order_date),
+    e.employee_id,
+    e.first_name,
+    e.last_name,
+    e.email
+HAVING 
+    SUM(oi.quantity * oi.unit_price) > 50000
+ORDER BY 
+    annee DESC,
+    chiffre_affaires DESC;
+
+-- =======================================================
+-- 2. Clients VIP (Sous-requête)
+-- =======================================================
+PROMPT
+PROMPT *** REQUÊTE 2 : Clients VIP (commande > moyenne) ***
+
+SELECT DISTINCT
+    c.customer_id,
+    c.name AS nom_client,
+    c.address,
+    c.credit_limit,
+    o.order_id,
+    o.order_date,
+    SUM(oi.quantity * oi.unit_price) AS montant_commande
+FROM 
+    GLOBAL_DATA.CUSTOMERS c
+    INNER JOIN GLOBAL_DATA.ORDERS o ON c.customer_id = o.customer_id
+    INNER JOIN GLOBAL_DATA.ORDER_ITEMS oi ON o.order_id = oi.order_id
+GROUP BY
+    c.customer_id,
+    c.name,
+    c.address,
+    c.credit_limit,
+    o.order_id,
+    o.order_date
+HAVING 
+    SUM(oi.quantity * oi.unit_price) > (
+        SELECT AVG(montant_total)
+        FROM (
+            SELECT SUM(quantity * unit_price) AS montant_total
+            FROM GLOBAL_DATA.ORDER_ITEMS
+            GROUP BY order_id
+        )
+    )
+ORDER BY 
+    montant_commande DESC;
+
+-- =======================================================
+-- 3. Vue V_MES_COMMANDES (Sécurité niveau ligne)
+-- =======================================================
+PROMPT
+PROMPT *** CRÉATION DE LA VUE V_MES_COMMANDES ***
+
+-- Créer la vue dans le schéma GLOBAL_DATA
+CREATE OR REPLACE VIEW GLOBAL_DATA.V_MES_COMMANDES AS
+SELECT 
+    o.order_id,
+    o.order_date,
+    o.status,
+    c.customer_id,
+    c.name AS nom_client,
+    c.address AS adresse_client,
+    e.employee_id,
+    e.first_name || ' ' || e.last_name AS nom_vendeur,
+    e.email AS email_vendeur,
+    COUNT(oi.item_id) AS nb_articles,
+    SUM(oi.quantity * oi.unit_price) AS montant_total
+FROM 
+    GLOBAL_DATA.ORDERS o
+    INNER JOIN GLOBAL_DATA.CUSTOMERS c ON o.customer_id = c.customer_id
+    INNER JOIN GLOBAL_DATA.EMPLOYEES e ON o.salesman_id = e.employee_id
+    INNER JOIN GLOBAL_DATA.ORDER_ITEMS oi ON o.order_id = oi.order_id
+WHERE 
+    -- Sécurité niveau ligne : ne voir que ses propres commandes
+    UPPER(e.email) = USER
+GROUP BY
+    o.order_id,
+    o.order_date,
+    o.status,
+    c.customer_id,
+    c.name,
+    c.address,
+    e.employee_id,
+    e.first_name,
+    e.last_name,
+    e.email;
+
+-- Accorder les privilèges SELECT au rôle ROLE_VENDEUR
+GRANT SELECT ON GLOBAL_DATA.V_MES_COMMANDES TO ROLE_VENDEUR;
+
+-- Créer un synonyme public pour faciliter l'accès
+CREATE OR REPLACE PUBLIC SYNONYM V_MES_COMMANDES FOR GLOBAL_DATA.V_MES_COMMANDES;
+
+PROMPT Vue V_MES_COMMANDES créée avec succès!
+
+-- =======================================================
+-- TEST DE LA VUE V_MES_COMMANDES
+-- =======================================================
+PROMPT
+PROMPT *** TEST DE LA VUE V_MES_COMMANDES ***
+
+-- Test en tant que SYS (devrait ne rien retourner car SYS n'est pas un vendeur)
+PROMPT Test en tant que SYS :
+SELECT COUNT(*) AS nb_commandes_visibles
+FROM GLOBAL_DATA.V_MES_COMMANDES;
+
+-- Afficher un exemple de vendeur pour le test manuel
+PROMPT
+PROMPT Pour tester la vue, connectez-vous avec un compte vendeur :
+SELECT UPPER(email) AS username, first_name, last_name
+FROM GLOBAL_DATA.EMPLOYEES
+WHERE job_title = 'Sales Representative'
+AND ROWNUM <= 3;
+
+PROMPT
+PROMPT Exemple de commande de test :
+PROMPT CONNECT EVIE.HARRISON@EXAMPLE.COM/[nouveau_mot_de_passe]
+PROMPT SELECT * FROM V_MES_COMMANDES;
+
+-- =======================================================
+-- FIN DU SCRIPT
+-- =======================================================
