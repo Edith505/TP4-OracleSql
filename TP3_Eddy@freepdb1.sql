@@ -116,16 +116,14 @@ BEGIN
     FOR tab IN (SELECT table_name FROM all_tables WHERE owner = p_utilisateur) LOOP
         v_sql := 'DROP TABLE ' || p_utilisateur || '.' || tab.table_name;
         EXECUTE IMMEDIATE v_sql;
-        DBMS_OUTPUT.PUT_LINE('Table ' || tab.table_name || ' dropped.');
+        DBMS_OUTPUT.PUT_LINE('Table ' || tab.table_name || ' supprimee.');
     END LOOP;
     DBMS_OUTPUT.PUT_LINE('Tous les tables utilisateur ' || p_utilisateur || ' ont été supprimées.');
 EXCEPTION
     WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('Error: ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('Erreure: ' || SQLERRM);
 END;
 /
-
-
 
 
 -- 3. Procédure PS_GRANT_SELECT_ALL
