@@ -151,7 +151,7 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('All SELECT privileges granted to ' || p_utilisateur || ' on schema ' || p_schema);
 EXCEPTION
     WHEN v_user_not_exists THEN
-        DBMS_OUTPUT.PUT_LINE('Erreur: Utilisateur ' || p_utilisateur || ' does not exist.');
+        DBMS_OUTPUT.PUT_LINE('Erreur: Utilisateur ' || p_utilisateur || ' n''existe pas.');
     WHEN v_schema_not_exists THEN
         DBMS_OUTPUT.PUT_LINE('Erreur: Schema ' || p_schema || ' n''existe pas.');
     WHEN OTHERS THEN
